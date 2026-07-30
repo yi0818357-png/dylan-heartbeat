@@ -486,17 +486,20 @@ ${historyText}`
   console.log("\n===== WAKE MESSAGES SUMMARY =====\n");
   console.log(JSON.stringify(summarizeWakeMessages(wakeMessages)));
 
-  if (!process.env.TARGET_API_URL || !process.env.TARGET_API_KEY || !process.env.MODEL_NAME) {
-    console.log("缺少 TARGET_API_URL / TARGET_API_KEY / MODEL_NAME，跳过本次唤醒");
-    return;
-  }
+  const wakeApiUrl = process.env.WAKE_API_URL || process.env.TARGET_API_URL;
+const wakeApiKey = process.env.WAKE_API_KEY || process.env.TARGET_API_KEY || "";
 
-  const response = await fetch(process.env.TARGET_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.TARGET_API_KEY}`
-    },
+if (!wakeApiUrl || !process.env.MODEL_NAME) {
+  console.log("缺少 TARGET_API_URL / WAKE_API_URL / MODEL_NAME，跳过本次唤醒");
+  return;
+}
+
+const response = await fetch(wakeApiUrl, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${wakeApiKey}`
+  },
     body: JSON.stringify({
       model: process.env.MODEL_NAME,
       messages: wakeMessages,
