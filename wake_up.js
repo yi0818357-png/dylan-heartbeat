@@ -114,19 +114,28 @@ async function sendPushNotification({ title, body }) {
   if (provider === "ntfy") {
     const topic = String(process.env.NTFY_TOPIC || "").trim();
     if (!topic) return { ok: false, providerLabel: "ntfy", reason: "NTFY_TOPIC 未配置" };
+    
     const server = (process.env.NTFY_SERVER_URL || "https://ntfy.sh").replace(/\/+$/, "");
+    
+    // 构造请求头
     const headers = {
       "Content-Type": "text/plain",
-      "Title": title,
+      "Title": String(title || ""),
       "Tags": process.env.NTFY_TAGS || "heart"
     };
-    if (process.env.NTFY_TOKEN) headers.Authorization = `Bearer ${process.env.NTFY_TOKEN}`;
+
+    if (process.env.NTFY_TOKEN) {
+      headers["Authorization"] = `Bearer ${process.env.NTFY_TOKEN}`;
+    }
+
     try {
+      // 避开 body: body 的重复键名，采用简写 body，并确保 body 有默认空串兜底
       const response = await fetchWithRetry(`${server}/${topic}`, {
         method: "POST",
-        headers,
-        body: body
+        headers: headers,
+        body: String(body || "")
       });
+
       const responseText = await response.text();
       if (!response.ok) {
         return { ok: false, providerLabel: "ntfy", reason: responseText || `HTTP ${response.status}` };
@@ -136,6 +145,7 @@ async function sendPushNotification({ title, body }) {
       return { ok: false, providerLabel: "ntfy", reason: err.message };
     }
   }
+}
 
   if (provider !== "bark") {
     return { ok: false, providerLabel: provider || "未知渠道", reason: `不支持的 PUSH_PROVIDER：${provider}` };
