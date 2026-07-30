@@ -486,7 +486,7 @@ ${historyText}`
   console.log("\n===== WAKE MESSAGES SUMMARY =====\n");
   console.log(JSON.stringify(summarizeWakeMessages(wakeMessages)));
 
-  const wakeApiUrl = process.env.WAKE_API_URL || process.env.TARGET_API_URL;
+  const wakeApiUrl = process.env.WAKE_API_URL || `${GATEWAY_BASE_URL}/v1/chat/completions`;
 const wakeApiKey = process.env.WAKE_API_KEY || process.env.TARGET_API_KEY || "";
 
 if (!wakeApiUrl || !process.env.MODEL_NAME) {
