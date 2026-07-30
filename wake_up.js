@@ -113,7 +113,13 @@ async function sendPushNotification({ title, body }) {
     const topic = String(process.env.NTFY_TOPIC || "").trim();
     if (!topic) return { ok: false, providerLabel: "ntfy", reason: "NTFY_TOPIC 未配置" };
     const server = (process.env.NTFY_SERVER_URL || "https://ntfy.sh").replace(/\/+$/, "");
-    const headers = { "Content-Type": "application/json" };
+    const headers = {
+  "Content-Type": "text/plain",
+  "Title": title,
+  "Tags": process.env.NTFY_TAGS || "heart"
+  },
+  body: body
+});
     if (process.env.NTFY_TOKEN) headers.Authorization = `Bearer ${process.env.NTFY_TOKEN}`;
     const payload = buildNtfyPayload({
       topic,
