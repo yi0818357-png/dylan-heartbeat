@@ -497,8 +497,13 @@ function readRestartCommand() {
 // ========================
 app.addHook("onRequest", (req, reply, done) => {
   if (req.url.startsWith("/admin")) return done();
-  // 批注 2026-07-15：公网部署常经过反代，真实公网请求可能在 Node 侧显示为 127/10 网段；
-  // 所以 ALLOW_PUBLIC_API=true 后必须先验 /v1 的网关 key，避免被云平台内网 IP 绕过。
+  // 内部密钥放行 /internal 路由
+  if (req.url.startsWith("/internal/")) {
+    const configuredKey = readEnvValue("GATEWAY_API_KEY");
+    const auth = String(req.headers.authorization || "");
+    const bearer = auth.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || "";
+    if (configuredKey && bearer === configuredKey) return done();
+  }
   if (readBooleanEnv("ALLOW_PUBLIC_API", false) && req.url.startsWith("/v1/")) {
     const configuredKey = readEnvValue("GATEWAY_API_KEY");
     if (!configuredKey) {
