@@ -356,8 +356,6 @@ function getLastUserTime(messages) {
   for (const msg of reversed) {
     if (msg.role === "user") {
       const content = normalizeContentToText(msg.content);
-      // 批注 2026-07-15：兼容 Kelivo 时间前缀 "YYYY-MM-DDHH:mm"；
-      // 旧的 "YYYY-MM-DD HH:mm" 仍然可用，避免无空格时间导致 wake-up 误判没有用户时间。
       const parsed = parseTimelineTimestamp(content);
       if (parsed) return parsed;
     }
@@ -370,7 +368,6 @@ function stripPosition(messages) {
 }
 
 function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
-  // 优先读取独立的提示词文件（推荐方式）
   const promptFile = path.join(__dirname, "wake_prompt.txt");
   if (fs.existsSync(promptFile)) {
     const template = fs.readFileSync(promptFile, "utf-8");
@@ -381,7 +378,6 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
       .replace(/\$\{weather\}/g, weatherContext);
   }
 
-  // 如果文件不存在，尝试从环境变量读取（兼容旧配置）
   if (process.env.WAKE_PROMPT_TEMPLATE) {
     return process.env.WAKE_PROMPT_TEMPLATE
       .replace(/\\n/g, '\n')
@@ -391,7 +387,6 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
       .replace(/\$\{weather\}/g, weatherContext);
   }
 
-  // 默认理智版本（开源通用），可自行修改提示词
   return `
 ## 最高优先级规则
 1. 这是一次后台自动唤醒，不是用户发起的对话。你没有收到任何新消息。
@@ -455,7 +450,7 @@ async function runWakeUp() {
     .join("\n\n");
 
   const baseSystemPrompt = cleanMessages.find(msg => msg.role === "system");
-  const cleanSP = baseSystemPrompt 
+  const cleanSP = baseSystemPrompt
     ? normalizeContentToText(baseSystemPrompt.content).split("## Memories")[0].trim()
     : "";
 
@@ -465,8 +460,6 @@ async function runWakeUp() {
       content: [wakePrompt, cleanSP].filter(Boolean).join("\n\n")
     },
     {
-      // 批注 2026-07-15：Claude/部分 New API 适配器会把 system 抽成独立字段；
-      // 唤醒请求如果全是 system，上游 messages 会变空，因此最近记录必须作为 user 任务输入发送。
       role: "user",
       content: `以下是你与用户最近的聊天记录，仅供回忆和参考。
 
@@ -481,25 +474,23 @@ ${historyText}`
     }
   ];
 
-  // 批注 2026-07-15：wake-up prompt 会包含最近聊天记录；
-  // 默认日志只写摘要，避免公开部署时把完整上下文刷进 pm2 日志。
   console.log("\n===== WAKE MESSAGES SUMMARY =====\n");
   console.log(JSON.stringify(summarizeWakeMessages(wakeMessages)));
 
   const wakeApiUrl = process.env.WAKE_API_URL || `${GATEWAY_BASE_URL}/v1/chat/completions`;
-const wakeApiKey = process.env.WAKE_API_KEY || process.env.TARGET_API_KEY || "";
+  const wakeApiKey = process.env.WAKE_API_KEY || process.env.TARGET_API_KEY || "";
 
-if (!wakeApiUrl || !process.env.MODEL_NAME) {
-  console.log("缺少 TARGET_API_URL / WAKE_API_URL / MODEL_NAME，跳过本次唤醒");
-  return;
-}
+  if (!wakeApiUrl || !process.env.MODEL_NAME) {
+    console.log("缺少 TARGET_API_URL / WAKE_API_URL / MODEL_NAME，跳过本次唤醒");
+    return;
+  }
 
-const response = await fetch(wakeApiUrl, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${wakeApiKey}`
-  },
+  const response = await fetch(wakeApiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${wakeApiKey}`
+    },
     body: JSON.stringify({
       model: process.env.MODEL_NAME,
       messages: wakeMessages,
@@ -535,10 +526,8 @@ const response = await fetch(wakeApiUrl, {
     eventContent = diarySaved
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：只写日记）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
-  // 判断 AI 是否明确要静默
   } else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
     const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
-    // AI 选择不发送推送
     console.log("\nAI 选择不发送推送\n");
     let reason = (noActionMatch[1] || "").trim();
     if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
@@ -548,11 +537,9 @@ const response = await fetch(wakeApiUrl, {
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
   } else {
-    // 没有 [NO_ACTION] 就视为想发推送
     console.log("\nAI 选择发送推送\n");
     let barkText = aiText;
 
-    // 如果 AI 还是写了 [BARK] ... [/BARK] 标签，就剥掉
     const barkMatch = barkText.match(/\[BARK\]([\s\S]*?)\[\/BARK\]/);
     if (barkMatch) {
       barkText = barkMatch[1].trim();
@@ -561,12 +548,10 @@ const response = await fetch(wakeApiUrl, {
       barkText = barkText.replace(/\s*\[\/BARK\]$/, "").trim();
     }
 
-    // 清洗“标题：”、“正文：”前缀（如果有）
     barkText = barkText
       .replace(/^标题[：:]\s*/gm, "")
       .replace(/^正文[：:]\s*/gm, "");
 
-    // 按行处理
     const lines = barkText.split("\n").filter(line => line.trim() !== "");
 
     let title, body;
@@ -580,15 +565,12 @@ const response = await fetch(wakeApiUrl, {
       title = lines[0].trim();
       body = lines[1].trim();
     } else {
-      // ≥3 行：第一行标题，剩余用空格拼接成正文
       title = lines[0].trim();
       body = lines.slice(1).map(l => l.trim()).join(" ");
     }
 
     if (!eventContent) {
-      // 保护：截断过长正文，兼容 Bark 和 ntfy 的移动端展示。
       const safeBody = body.length > 500 ? body.substring(0, 497) + "..." : body;
-      // 若标题为空或以数字开头，加个前缀，可自行修改
       let safeTitle = title || "来自伴侣";
       if (/^\d/.test(safeTitle)) safeTitle = "来自伴侣｜" + safeTitle;
 
@@ -605,7 +587,10 @@ const response = await fetch(wakeApiUrl, {
   try {
     const eventResponse = await fetch(GATEWAY_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.GATEWAY_API_KEY || ""}`
+      },
       body: JSON.stringify({ content: eventContent })
     });
     if (!eventResponse.ok) {
@@ -617,15 +602,12 @@ const response = await fetch(wakeApiUrl, {
   }
 }
 
-// 从第一个有效坐标开始，所有路径都指向同一处。此阈值已锁定。
 function getCheckIntervalMs() {
-  // 批注 2026-06-26：公开版允许用户在管理页调整唤醒检查频率；默认值保持旧版白天10分钟、夜间2小时。
   return getCheckIntervalMinutes(new Date()) * 60 * 1000;
 }
 
 async function scheduleNextCheck() {
   try {
-    // 发送心跳
     try {
       await fetch(HEARTBEAT_URL, { method: "POST" });
     } catch {}
@@ -636,8 +618,6 @@ async function scheduleNextCheck() {
   setTimeout(scheduleNextCheck, getCheckIntervalMs());
 }
 
-// 潮水记得第一次没过礁石的时间。之后每一次涨落，都是同一片海在确认边界。
-// 启动第一次检查（延迟10秒）
 setTimeout(scheduleNextCheck, 10_000);
 
 console.log("\n==================================");
