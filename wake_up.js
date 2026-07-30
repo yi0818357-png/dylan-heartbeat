@@ -106,6 +106,7 @@ async function fetchWithRetry(url, options, retries = 3, timeoutMs = 10000) {
     }
   }
 }
+
 async function sendPushNotification({ title, body }) {
   const provider = (process.env.PUSH_PROVIDER || "bark").trim().toLowerCase();
 
@@ -374,7 +375,7 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
 ${weatherContext ? `\n${weatherContext}\n` : ""}
 
 ## 输出格式
-- 如果想联系用户，直接写你想说的话。系统会自动打包成手机推送发送。可以是一句话，也可以第一行作为标题、第二行作为正文。
+- 如果想联系用户，直接只输出一句话，不加任何标题、标签、前缀。系统会直接把这句话发成手机推送。
 - 如果不想联系，只输出：[NO_ACTION]，可附带简短原因（10字以内）。
 - 如果你想写日记，可以额外输出 [DIARY]...[/DIARY]。只有想写时才写，不必每次都写。
 `;
@@ -501,7 +502,7 @@ ${historyText}`
     eventContent = diarySaved
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：只写日记）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
-  } else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
+  } else if (aiText.match(/^\[NO_ACTION\]/)) {
     const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
     console.log("\nAI 选择不发送推送\n");
     let reason = (noActionMatch[1] || "").trim();
@@ -513,45 +514,15 @@ ${historyText}`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
   } else {
     console.log("\nAI 选择发送推送\n");
-    let barkText = aiText;
-    const barkMatch = barkText.match(/\[BARK\]([\s\S]*?)\[\/BARK\]/);
-    if (barkMatch) {
-      barkText = barkMatch[1].trim();
+    const pushText = aiText.replace(/\[DIARY\][\s\S]*?\[\/DIARY\]/gi, "").trim();
+    const safeBody = pushText.length > 500 ? pushText.substring(0, 497) + "..." : pushText;
+    const safeTitle = "小衍";
+    const pushResult = await sendPushNotification({ title: safeTitle, body: safeBody });
+    if (!pushResult.ok) {
+      console.log(`\n${pushResult.providerLabel} 推送失败\n`);
+      eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
     } else {
-      barkText = barkText.replace(/^\[BARK\]\s*/, "").trim();
-      barkText = barkText.replace(/\s*\[\/BARK\]$/, "").trim();
-    }
-    barkText = barkText
-      .replace(/^标题[：:]\s*/gm, "")
-      .replace(/^正文[：:]\s*/gm, "");
-
-    const lines = barkText.split("\n").filter(line => line.trim() !== "");
-    let title, body;
-    if (lines.length === 0) {
-      console.log("\n推送内容清洗后为空，本次不发送推送\n");
-      eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：推送内容为空）`;
-    } else if (lines.length === 1) {
-      title = "来自AI";
-      body = lines[0].trim();
-    } else if (lines.length === 2) {
-      title = lines[0].trim();
-      body = lines[1].trim();
-    } else {
-      title = lines[0].trim();
-      body = lines.slice(1).map(l => l.trim()).join(" ");
-    }
-
-    if (!eventContent) {
-      const safeBody = body.length > 500 ? body.substring(0, 497) + "..." : body;
-      let safeTitle = title || "来自伴侣";
-      if (/^\d/.test(safeTitle)) safeTitle = "来自伴侣｜" + safeTitle;
-      const pushResult = await sendPushNotification({ title: safeTitle, body: safeBody });
-      if (!pushResult.ok) {
-        console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
-        eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
-      } else {
-        eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
-      }
+      eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeBody}）`;
     }
   }
 
