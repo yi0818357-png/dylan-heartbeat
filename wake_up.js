@@ -59,7 +59,6 @@ function getDiaryTimeString(date = new Date()) {
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
-// 批注 2026-07-11：日记只接受模型显式输出的 [DIARY] 块，避免把普通推送内容误写进本地日记。
 function extractDiaryFromResponse(text) {
   const diaryBlocks = [];
   const remainingText = String(text || "").replace(/\[DIARY\]([\s\S]*?)\[\/DIARY\]/gi, (_, content) => {
@@ -78,10 +77,8 @@ function appendDiaryEntry(content) {
     console.log("模型写了日记，但 DIARY_ENABLED=false，本次不保存");
     return false;
   }
-
   const cleanContent = String(content || "").trim();
   if (!cleanContent) return false;
-
   fs.mkdirSync(DIARY_DIR_PATH, { recursive: true });
   const diaryFile = path.join(DIARY_DIR_PATH, `${getDiaryDateString()}.md`);
   const entry = `\n\n## ${getDiaryTimeString()}\n\n${cleanContent}\n`;
@@ -90,18 +87,14 @@ function appendDiaryEntry(content) {
   return true;
 }
 
-// 批注 2026-07-11：推送层扩展为 Bark/ntfy；默认仍走 Bark，保护旧部署不改 .env 也能继续运行。
 async function sendPushNotification({ title, body }) {
   const provider = (process.env.PUSH_PROVIDER || "bark").trim().toLowerCase();
 
   if (provider === "ntfy") {
     const topic = String(process.env.NTFY_TOPIC || "").trim();
     if (!topic) return { ok: false, providerLabel: "ntfy", reason: "NTFY_TOPIC 未配置" };
-
     const server = (process.env.NTFY_SERVER_URL || "https://ntfy.sh").replace(/\/+$/, "");
-    const headers = {
-      "Content-Type": "application/json"
-    };
+    const headers = { "Content-Type": "application/json" };
     if (process.env.NTFY_TOKEN) headers.Authorization = `Bearer ${process.env.NTFY_TOKEN}`;
     const payload = buildNtfyPayload({
       topic,
@@ -110,7 +103,6 @@ async function sendPushNotification({ title, body }) {
       priority: process.env.NTFY_PRIORITY,
       tags: process.env.NTFY_TAGS
     });
-
     const response = await fetch(server, {
       method: "POST",
       headers,
@@ -137,20 +129,15 @@ async function sendPushNotification({ title, body }) {
     device_key: process.env.BARK_KEY,
     icon: process.env.CUSTOM_ICON_URL
   };
-
   const response = await fetch("https://api.day.app/push", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(barkPayload)
   });
-
   const responseText = await response.text();
   let result = {};
-  try {
-    result = JSON.parse(responseText);
-  } catch {}
+  try { result = JSON.parse(responseText); } catch {}
   console.log("\nBark Result:\n", result || responseText);
-
   if (!response.ok || (result.code && result.code !== 200)) {
     return { ok: false, providerLabel: "Bark", reason: result.message || `HTTP ${response.status}` };
   }
@@ -181,7 +168,6 @@ function getCheckIntervalMinutes(date = new Date()) {
 function normalizeContentToText(content) {
   if (typeof content === "string") return content;
   if (content == null) return "";
-
   if (Array.isArray(content)) {
     return content
       .map(part => {
@@ -196,13 +182,11 @@ function normalizeContentToText(content) {
       .filter(Boolean)
       .join("\n");
   }
-
   if (content && typeof content === "object") {
     const type = typeof content.type === "string" ? content.type.toLowerCase() : "";
     if (content.image_url || type.includes("image")) return "[图片]";
     if (content.file || type.includes("file")) return "[文件]";
   }
-
   return "[非文本内容]";
 }
 
@@ -219,41 +203,23 @@ function summarizeWakeMessages(messages = []) {
 
 function weatherCodeText(code) {
   const table = {
-    0: "晴朗",
-    1: "大致晴朗",
-    2: "局部多云",
-    3: "阴天",
-    45: "有雾",
-    48: "雾凇",
-    51: "小毛毛雨",
-    53: "中等毛毛雨",
-    55: "较强毛毛雨",
-    61: "小雨",
-    63: "中雨",
-    65: "大雨",
-    71: "小雪",
-    73: "中雪",
-    75: "大雪",
-    80: "阵雨",
-    81: "较强阵雨",
-    82: "强阵雨",
-    95: "雷暴",
-    96: "雷暴伴小冰雹",
-    99: "雷暴伴大冰雹"
+    0: "晴朗", 1: "大致晴朗", 2: "局部多云", 3: "阴天",
+    45: "有雾", 48: "雾凇", 51: "小毛毛雨", 53: "中等毛毛雨", 55: "较强毛毛雨",
+    61: "小雨", 63: "中雨", 65: "大雨", 71: "小雪", 73: "中雪", 75: "大雪",
+    80: "阵雨", 81: "较强阵雨", 82: "强阵雨", 95: "雷暴",
+    96: "雷暴伴小冰雹", 99: "雷暴伴大冰雹"
   };
   return table[code] || `天气代码 ${code}`;
 }
 
 async function fetchWeatherContext() {
   if (!readBooleanEnv("WEATHER_ENABLED", false)) return "";
-
   const lat = Number(process.env.WEATHER_LAT);
   const lon = Number(process.env.WEATHER_LON);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     console.log("已启用 WEATHER_ENABLED，但 WEATHER_LAT / WEATHER_LON 未正确配置，跳过天气注入");
     return "";
   }
-
   const location = process.env.WEATHER_LOCATION_NAME || "当前位置";
   const units = (process.env.WEATHER_UNITS || "metric").trim().toLowerCase();
   const temperatureUnit = units === "fahrenheit" ? "fahrenheit" : "celsius";
@@ -267,7 +233,6 @@ async function fetchWeatherContext() {
   url.searchParams.set("forecast_days", "1");
   url.searchParams.set("temperature_unit", temperatureUnit);
   url.searchParams.set("wind_speed_unit", windSpeedUnit);
-
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), WEATHER_TIMEOUT_MS);
   try {
@@ -302,7 +267,6 @@ function loadTimelineMessages() {
     console.log("未找到 enhanced_messages.json");
     return null;
   }
-
   try {
     const parsed = JSON.parse(fs.readFileSync(TIMELINE_PATH, "utf-8"));
     if (!Array.isArray(parsed)) {
@@ -316,9 +280,7 @@ function loadTimelineMessages() {
   }
 }
 
-function getNow() {
-  return new Date();
-}
+function getNow() { return new Date(); }
 
 function getChinaTimeString() {
   return new Date().toLocaleString("zh-CN", { timeZone: TIME_ZONE });
@@ -327,12 +289,7 @@ function getChinaTimeString() {
 function getLocalTimeString() {
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
-  const yyyy = now.getFullYear();
-  const mm = pad(now.getMonth() + 1);
-  const dd = pad(now.getDate());
-  const hh = pad(now.getHours());
-  const min = pad(now.getMinutes());
-  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
 function shouldWake(lastUserTime) {
@@ -377,7 +334,6 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
       .replace(/\$\{weatherContext\}/g, weatherContext)
       .replace(/\$\{weather\}/g, weatherContext);
   }
-
   if (process.env.WAKE_PROMPT_TEMPLATE) {
     return process.env.WAKE_PROMPT_TEMPLATE
       .replace(/\\n/g, '\n')
@@ -386,7 +342,6 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
       .replace(/\$\{weatherContext\}/g, weatherContext)
       .replace(/\$\{weather\}/g, weatherContext);
   }
-
   return `
 ## 最高优先级规则
 1. 这是一次后台自动唤醒，不是用户发起的对话。你没有收到任何新消息。
@@ -539,7 +494,6 @@ ${historyText}`
   } else {
     console.log("\nAI 选择发送推送\n");
     let barkText = aiText;
-
     const barkMatch = barkText.match(/\[BARK\]([\s\S]*?)\[\/BARK\]/);
     if (barkMatch) {
       barkText = barkMatch[1].trim();
@@ -547,13 +501,11 @@ ${historyText}`
       barkText = barkText.replace(/^\[BARK\]\s*/, "").trim();
       barkText = barkText.replace(/\s*\[\/BARK\]$/, "").trim();
     }
-
     barkText = barkText
       .replace(/^标题[：:]\s*/gm, "")
       .replace(/^正文[：:]\s*/gm, "");
 
     const lines = barkText.split("\n").filter(line => line.trim() !== "");
-
     let title, body;
     if (lines.length === 0) {
       console.log("\n推送内容清洗后为空，本次不发送推送\n");
@@ -573,7 +525,6 @@ ${historyText}`
       const safeBody = body.length > 500 ? body.substring(0, 497) + "..." : body;
       let safeTitle = title || "来自伴侣";
       if (/^\d/.test(safeTitle)) safeTitle = "来自伴侣｜" + safeTitle;
-
       const pushResult = await sendPushNotification({ title: safeTitle, body: safeBody });
       if (!pushResult.ok) {
         console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
@@ -609,7 +560,12 @@ function getCheckIntervalMs() {
 async function scheduleNextCheck() {
   try {
     try {
-      await fetch(HEARTBEAT_URL, { method: "POST" });
+      await fetch(HEARTBEAT_URL, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.GATEWAY_API_KEY || ""}`
+        }
+      });
     } catch {}
     await runWakeUp();
   } catch (err) {
