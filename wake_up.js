@@ -87,6 +87,25 @@ function appendDiaryEntry(content) {
   return true;
 }
 
+async function fetchWithRetry(url, options, retries = 3, timeoutMs = 10000) {
+  for (let i = 0; i < retries; i++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (err) {
+      clearTimeout(timer);
+      if (i < retries - 1) {
+        console.log(`fetch 失败第 ${i + 1} 次，2秒后重试：${err.message}`);
+        await new Promise(r => setTimeout(r, 2000));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
 async function sendPushNotification({ title, body }) {
   const provider = (process.env.PUSH_PROVIDER || "bark").trim().toLowerCase();
 
@@ -103,7 +122,7 @@ async function sendPushNotification({ title, body }) {
       priority: process.env.NTFY_PRIORITY,
       tags: process.env.NTFY_TAGS
     });
-    const response = await fetch(server, {
+    const response = await fetchWithRetry(server, {
       method: "POST",
       headers,
       body: JSON.stringify(payload)
