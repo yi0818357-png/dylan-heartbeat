@@ -114,30 +114,25 @@ async function sendPushNotification({ title, body }) {
     if (!topic) return { ok: false, providerLabel: "ntfy", reason: "NTFY_TOPIC 未配置" };
     const server = (process.env.NTFY_SERVER_URL || "https://ntfy.sh").replace(/\/+$/, "");
     const headers = {
-  "Content-Type": "text/plain",
-  "Title": title,
-  "Tags": process.env.NTFY_TAGS || "heart"
-  },
-  body: body
-});
+      "Content-Type": "text/plain",
+      "Title": title,
+      "Tags": process.env.NTFY_TAGS || "heart"
+    };
     if (process.env.NTFY_TOKEN) headers.Authorization = `Bearer ${process.env.NTFY_TOKEN}`;
-    const payload = buildNtfyPayload({
-      topic,
-      title,
-      message: body,
-      priority: process.env.NTFY_PRIORITY,
-      tags: process.env.NTFY_TAGS
-    });
-    const response = await fetchWithRetry(`${server}/${topic}`, {
-  method: "POST",
-  headers,
-  body: JSON.stringify(payload)
-});
-    const responseText = await response.text();
-    if (!response.ok) {
-      return { ok: false, providerLabel: "ntfy", reason: responseText || `HTTP ${response.status}` };
+    try {
+      const response = await fetchWithRetry(`${server}/${topic}`, {
+        method: "POST",
+        headers,
+        body: body
+      });
+      const responseText = await response.text();
+      if (!response.ok) {
+        return { ok: false, providerLabel: "ntfy", reason: responseText || `HTTP ${response.status}` };
+      }
+      return { ok: true, providerLabel: "ntfy" };
+    } catch (err) {
+      return { ok: false, providerLabel: "ntfy", reason: err.message };
     }
-    return { ok: true, providerLabel: "ntfy" };
   }
 
   if (provider !== "bark") {
