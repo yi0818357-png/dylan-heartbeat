@@ -122,11 +122,11 @@ async function sendPushNotification({ title, body }) {
       priority: process.env.NTFY_PRIORITY,
       tags: process.env.NTFY_TAGS
     });
-    const response = await fetchWithRetry(server, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload)
-    });
+    const response = await fetchWithRetry(`${server}/${topic}`, {
+  method: "POST",
+  headers,
+  body: JSON.stringify(payload)
+});
     const responseText = await response.text();
     if (!response.ok) {
       return { ok: false, providerLabel: "ntfy", reason: responseText || `HTTP ${response.status}` };
