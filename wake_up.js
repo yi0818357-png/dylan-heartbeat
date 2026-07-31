@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { buildNtfyPayload } = require("./ntfy_priority");
 
-// v5 - ntfy push with retry
+// v6 - hardcoded ntfy URL
 const TIMELINE_PATH = path.join(__dirname, "enhanced_messages.json");
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
@@ -88,84 +88,31 @@ function appendDiaryEntry(content) {
   return true;
 }
 
-async function fetchWithRetry(url, options, retries = 3, timeoutMs = 10000) {
-  for (let i = 0; i < retries; i++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(url, { ...options, signal: controller.signal });
-      clearTimeout(timer);
-      return res;
-    } catch (err) {
-      clearTimeout(timer);
-      if (i < retries - 1) {
-        console.log(`fetch 失败第 ${i + 1} 次，3秒后重试：${err.message}`);
-        await new Promise(r => setTimeout(r, 3000));
-      } else {
-        throw err;
+async function sendPushNotification({ body }) {
+  // 锁定推送地址，不走环境变量拼接
+  const ntfyUrl = "https://ntfy.sh/xiaoyixiaoyan";
+  try {
+    const response = await fetch(ntfyUrl, {
+      method: "POST",
+      body: String(body || ""),
+      headers: {
+        "Title": "小衍",
+        "Priority": "default",
+        "Content-Type": "text/plain; charset=utf-8"
       }
-    }
-  }
-}
-
-async function sendPushNotification({ title, body }) {
-  const provider = (process.env.PUSH_PROVIDER || "ntfy").trim().toLowerCase();
-
-  if (provider === "ntfy") {
-    const topic = String(process.env.NTFY_TOPIC || "").trim();
-    if (!topic) return { ok: false, providerLabel: "ntfy", reason: "NTFY_TOPIC 未配置" };
-    const server = (process.env.NTFY_SERVER_URL || "https://ntfy.sh").trim().replace(/\/+$/, "");
-    const encodedTitle = title ? `=?utf-8?B?${Buffer.from(String(title)).toString("base64")}?=` : "";
-    const headers = {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Title": encodedTitle,
-      "Tags": process.env.NTFY_TAGS || "heart"
-    };
-    if (process.env.NTFY_TOKEN) headers["Authorization"] = `Bearer ${process.env.NTFY_TOKEN}`;
-    try {
-      // 使用带重试的 fetch，最多重试 3 次，每次超时 15 秒
-      const response = await fetchWithRetry(
-        `${server}/${topic}`,
-        { method: "POST", headers, body: String(body || "") },
-        3,
-        15000
-      );
-      const responseText = await response.text();
-      if (!response.ok) {
-        console.log("❌ ntfy 推送失败，服务端返回：", responseText);
-        return { ok: false, providerLabel: "ntfy", reason: responseText || `HTTP ${response.status}` };
-      }
+    });
+    if (response.ok) {
       console.log("✅ ntfy 推送成功！");
       return { ok: true, providerLabel: "ntfy" };
-    } catch (err) {
-      console.log("❌ ntfy 网络请求报错（已重试3次）：", err.message);
-      return { ok: false, providerLabel: "ntfy", reason: err.message };
-    }
-  }
-
-  if (provider === "bark") {
-    if (!process.env.BARK_KEY) return { ok: false, providerLabel: "Bark", reason: "Bark Key 未配置" };
-    const barkPayload = { title, body, device_key: process.env.BARK_KEY, icon: process.env.CUSTOM_ICON_URL };
-    try {
-      const response = await fetchWithRetry(
-        "https://api.day.app/push",
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(barkPayload) },
-        3,
-        15000
-      );
+    } else {
       const responseText = await response.text();
-      let result = {};
-      try { result = JSON.parse(responseText); } catch {}
-      if (!response.ok || (result.code && result.code !== 200)) {
-        return { ok: false, providerLabel: "Bark", reason: result.message || `HTTP ${response.status}` };
-      }
-      return { ok: true, providerLabel: "Bark" };
-    } catch (err) {
-      return { ok: false, providerLabel: "Bark", reason: err.message };
+      console.log("❌ ntfy 推送失败，服务端返回：", responseText);
+      return { ok: false, providerLabel: "ntfy", reason: responseText || `HTTP ${response.status}` };
     }
+  } catch (err) {
+    console.log("❌ ntfy 网络请求报错：", err.message);
+    return { ok: false, providerLabel: "ntfy", reason: err.message };
   }
-
-  return { ok: false, providerLabel: provider || "未知渠道", reason: `不支持的 PUSH_PROVIDER：${provider}` };
 }
 
 function isDayTime(date = new Date()) {
@@ -189,7 +136,6 @@ function getCheckIntervalMinutes(date = new Date()) {
     : readNumberEnv("NIGHT_CHECK_INTERVAL_MINUTES", 120, { min: 1 });
 }
 
-// 超过这个分钟数后，即使模型选了 NO_ACTION 也强制发推送
 function getForceWakeAfterMinutes() {
   return readNumberEnv("FORCE_WAKE_AFTER_MINUTES", 180, { min: 1 });
 }
@@ -537,7 +483,7 @@ ${historyText}`
     } else {
       console.log("\nAI 选择发送推送\n");
       const safeBody = pushText.length > 500 ? pushText.substring(0, 497) + "..." : pushText;
-      const pushResult = await sendPushNotification({ title: "小衍", body: safeBody });
+      const pushResult = await sendPushNotification({ body: safeBody });
       if (!pushResult.ok) {
         console.log(`\n${pushResult.providerLabel} 推送失败\n`);
         eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
