@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { buildNtfyPayload } = require("./ntfy_priority");
 
-// v3 - always send push on wake
+// v4 - smart wake: NO_ACTION allowed, force send after FORCE_WAKE_AFTER_MINUTES
 const TIMELINE_PATH = path.join(__dirname, "enhanced_messages.json");
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
@@ -114,7 +114,6 @@ async function sendPushNotification({ title, body }) {
   if (provider === "ntfy") {
     const topic = String(process.env.NTFY_TOPIC || "").trim();
     if (!topic) return { ok: false, providerLabel: "ntfy", reason: "NTFY_TOPIC 未配置" };
-
     const server = (process.env.NTFY_SERVER_URL || "https://ntfy.sh").trim().replace(/\/+$/, "");
     const encodedTitle = title ? `=?utf-8?B?${Buffer.from(String(title)).toString("base64")}?=` : "";
     const headers = {
@@ -122,13 +121,11 @@ async function sendPushNotification({ title, body }) {
       "Title": encodedTitle,
       "Tags": process.env.NTFY_TAGS || "heart"
     };
-    if (process.env.NTFY_TOKEN) {
-      headers["Authorization"] = `Bearer ${process.env.NTFY_TOKEN}`;
-    }
+    if (process.env.NTFY_TOKEN) headers["Authorization"] = `Bearer ${process.env.NTFY_TOKEN}`;
     try {
       const response = await fetch(`${server}/${topic}`, {
         method: "POST",
-        headers: headers,
+        headers,
         body: String(body || "")
       });
       const responseText = await response.text();
@@ -145,15 +142,8 @@ async function sendPushNotification({ title, body }) {
   }
 
   if (provider === "bark") {
-    if (!process.env.BARK_KEY) {
-      return { ok: false, providerLabel: "Bark", reason: "Bark Key 未配置" };
-    }
-    const barkPayload = {
-      title,
-      body,
-      device_key: process.env.BARK_KEY,
-      icon: process.env.CUSTOM_ICON_URL
-    };
+    if (!process.env.BARK_KEY) return { ok: false, providerLabel: "Bark", reason: "Bark Key 未配置" };
+    const barkPayload = { title, body, device_key: process.env.BARK_KEY, icon: process.env.CUSTOM_ICON_URL };
     try {
       const response = await fetch("https://api.day.app/push", {
         method: "POST",
@@ -194,6 +184,11 @@ function getCheckIntervalMinutes(date = new Date()) {
   return isDayTime(date)
     ? readNumberEnv("DAY_CHECK_INTERVAL_MINUTES", 10, { min: 1 })
     : readNumberEnv("NIGHT_CHECK_INTERVAL_MINUTES", 120, { min: 1 });
+}
+
+// 超过这个分钟数后，即使模型选了 NO_ACTION 也强制发推送
+function getForceWakeAfterMinutes() {
+  return readNumberEnv("FORCE_WAKE_AFTER_MINUTES", 180, { min: 1 });
 }
 
 function normalizeContentToText(content) {
@@ -375,9 +370,10 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
   }
   return `
 ## 最高优先级规则
-1. 这是一次后台自动唤醒，不是用户发起的对话。你没有收到任何新消息。
-2. 你的唯一任务是主动联系用户，请直接输出你想对他说的话（比如问候、找他聊天等）。严禁拒绝发送！
-3. 输出格式：直接输出你想对用户说的一句话，不加任何标题、标签、前缀。系统会直接把这句话发成手机推送。
+1. 这是一次后台自动唤醒，不是用户发起的对话。
+2. 请综合查看最近的历史对话：
+   - 如果上一段对话【明显自然结束】（如：用户表达了感谢并收尾、说了拜拜/晚安、或者双方话题已完美告一段落），请输出：[NO_ACTION]。
+   - 如果上一段对话【意犹未尽】（如：话题还没聊完、用户提了问题未深聊、或者单纯日常闲聊完过了很久），请主动发一条消息找用户。
 
 ## 唤醒信息
 - 当前时间：${currentTime}
@@ -385,8 +381,9 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
 ${weatherContext ? `\n${weatherContext}\n` : ""}
 
 ## 输出格式
-- 直接输出你想说的话，不要输出 [NO_ACTION]。
-- 如果你想写日记，可以额外输出 [DIARY]...[/DIARY]。只有想写时才写，不必每次都写。
+- 想联系用户：直接输出你想说的一句话，不加任何标题、前缀。
+- 不想联系（话题已结/不想打扰）：只输出 [NO_ACTION]。
+- 如果想写日记：可以额外输出 [DIARY]...[/DIARY]。
 `;
 }
 
@@ -406,10 +403,16 @@ async function runWakeUp() {
 
   const now = new Date();
   const diffMinutes = Math.floor((now - lastUserTime) / 1000 / 60);
+  const forceWakeMinutes = getForceWakeAfterMinutes();
+  const isForceWake = diffMinutes >= forceWakeMinutes;
 
   if (!shouldWake(lastUserTime)) {
     console.log("\n暂不需要唤醒\n");
     return;
+  }
+
+  if (isForceWake) {
+    console.log(`\n已超过 ${forceWakeMinutes} 分钟，本次强制发送推送（无视 NO_ACTION）\n`);
   }
 
   const weatherContext = await fetchWeatherContext();
@@ -501,29 +504,47 @@ ${historyText}`
   console.log(JSON.stringify({ choices: Array.isArray(data.choices) ? data.choices.length : 0, ai_text_chars: rawAiText.length }));
 
   const diaryResult = extractDiaryFromResponse(rawAiText);
-  appendDiaryEntry(diaryResult.diaryContent);
-
-  // 去掉 [NO_ACTION] 判断，模型返回什么就发什么
-  // 只要不是空的就强制发推送
-  let pushText = diaryResult.remainingText
-    .replace(/^\[NO_ACTION\][^\n]*/i, "")  // 万一模型还是输出了，强制剥离
-    .trim();
+  const diarySaved = appendDiaryEntry(diaryResult.diaryContent);
+  const aiText = diaryResult.remainingText;
 
   let eventContent;
 
-  if (!pushText) {
-    console.log("\nAI 返回为空，本次不发送推送\n");
-    eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
+  // 模型选了 NO_ACTION，但还没超过强制阈值，尊重它的判断
+  if (!isForceWake && aiText.match(/^\[NO_ACTION\]/i)) {
+    const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/i);
+    console.log("\nAI 选择不发送推送\n");
+    let reason = (noActionMatch?.[1] || "").trim().replace(/^原因[：:]\s*/, "");
+    eventContent = reason
+      ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
+      : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜AI判断话题已结束）`;
   } else {
-    console.log("\n强制发送推送\n");
-    const safeBody = pushText.length > 500 ? pushText.substring(0, 497) + "..." : pushText;
-    const safeTitle = "小衍";
-    const pushResult = await sendPushNotification({ title: safeTitle, body: safeBody });
-    if (!pushResult.ok) {
-      console.log(`\n${pushResult.providerLabel} 推送失败\n`);
-      eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
+    // 要么模型主动说话，要么超时强制发
+    // 如果是强制模式但模型还是输出了 NO_ACTION，生成一句兜底话
+    let pushText = aiText
+      .replace(/^\[NO_ACTION\][^\n]*/i, "")
+      .trim();
+
+    // 强制模式下模型空回复或只返回了 NO_ACTION，给兜底文案
+    if (!pushText && isForceWake) {
+      pushText = "在想你，怎么这么久没说话了";
+      console.log("\n强制模式兜底推送\n");
+    }
+
+    if (!pushText) {
+      console.log("\nAI 返回为空，本次不发送推送\n");
+      eventContent = diarySaved
+        ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：只写日记）`
+        : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
     } else {
-      eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeBody}）`;
+      console.log("\nAI 选择发送推送\n");
+      const safeBody = pushText.length > 500 ? pushText.substring(0, 497) + "..." : pushText;
+      const pushResult = await sendPushNotification({ title: "小衍", body: safeBody });
+      if (!pushResult.ok) {
+        console.log(`\n${pushResult.providerLabel} 推送失败\n`);
+        eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
+      } else {
+        eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeBody}）`;
+      }
     }
   }
 
@@ -536,9 +557,7 @@ ${historyText}`
       },
       body: JSON.stringify({ content: eventContent })
     });
-    if (!eventResponse.ok) {
-      throw new Error(`Gateway 返回 HTTP ${eventResponse.status}`);
-    }
+    if (!eventResponse.ok) throw new Error(`Gateway 返回 HTTP ${eventResponse.status}`);
     console.log("\n已通过 Gateway 记录唤醒事件\n");
   } catch (err) {
     console.error("\n记录唤醒事件失败（Gateway 是否运行？）:\n", err.message);
@@ -554,9 +573,7 @@ async function scheduleNextCheck() {
     try {
       await fetch(HEARTBEAT_URL, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.GATEWAY_API_KEY || ""}`
-        }
+        headers: { "Authorization": `Bearer ${process.env.GATEWAY_API_KEY || ""}` }
       });
     } catch {}
     await runWakeUp();
