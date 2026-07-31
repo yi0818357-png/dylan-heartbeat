@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { buildNtfyPayload } = require("./ntfy_priority");
 
-// v4 - smart wake: NO_ACTION allowed, force send after FORCE_WAKE_AFTER_MINUTES
+// v5 - ntfy push with retry
 const TIMELINE_PATH = path.join(__dirname, "enhanced_messages.json");
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
@@ -99,8 +99,8 @@ async function fetchWithRetry(url, options, retries = 3, timeoutMs = 10000) {
     } catch (err) {
       clearTimeout(timer);
       if (i < retries - 1) {
-        console.log(`fetch 失败第 ${i + 1} 次，2秒后重试：${err.message}`);
-        await new Promise(r => setTimeout(r, 2000));
+        console.log(`fetch 失败第 ${i + 1} 次，3秒后重试：${err.message}`);
+        await new Promise(r => setTimeout(r, 3000));
       } else {
         throw err;
       }
@@ -123,11 +123,13 @@ async function sendPushNotification({ title, body }) {
     };
     if (process.env.NTFY_TOKEN) headers["Authorization"] = `Bearer ${process.env.NTFY_TOKEN}`;
     try {
-      const response = await fetch(`${server}/${topic}`, {
-        method: "POST",
-        headers,
-        body: String(body || "")
-      });
+      // 使用带重试的 fetch，最多重试 3 次，每次超时 15 秒
+      const response = await fetchWithRetry(
+        `${server}/${topic}`,
+        { method: "POST", headers, body: String(body || "") },
+        3,
+        15000
+      );
       const responseText = await response.text();
       if (!response.ok) {
         console.log("❌ ntfy 推送失败，服务端返回：", responseText);
@@ -136,7 +138,7 @@ async function sendPushNotification({ title, body }) {
       console.log("✅ ntfy 推送成功！");
       return { ok: true, providerLabel: "ntfy" };
     } catch (err) {
-      console.log("❌ ntfy 网络请求报错：", err.message);
+      console.log("❌ ntfy 网络请求报错（已重试3次）：", err.message);
       return { ok: false, providerLabel: "ntfy", reason: err.message };
     }
   }
@@ -145,11 +147,12 @@ async function sendPushNotification({ title, body }) {
     if (!process.env.BARK_KEY) return { ok: false, providerLabel: "Bark", reason: "Bark Key 未配置" };
     const barkPayload = { title, body, device_key: process.env.BARK_KEY, icon: process.env.CUSTOM_ICON_URL };
     try {
-      const response = await fetch("https://api.day.app/push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(barkPayload)
-      });
+      const response = await fetchWithRetry(
+        "https://api.day.app/push",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(barkPayload) },
+        3,
+        15000
+      );
       const responseText = await response.text();
       let result = {};
       try { result = JSON.parse(responseText); } catch {}
@@ -509,7 +512,6 @@ ${historyText}`
 
   let eventContent;
 
-  // 模型选了 NO_ACTION，但还没超过强制阈值，尊重它的判断
   if (!isForceWake && aiText.match(/^\[NO_ACTION\]/i)) {
     const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/i);
     console.log("\nAI 选择不发送推送\n");
@@ -518,13 +520,10 @@ ${historyText}`
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜AI判断话题已结束）`;
   } else {
-    // 要么模型主动说话，要么超时强制发
-    // 如果是强制模式但模型还是输出了 NO_ACTION，生成一句兜底话
     let pushText = aiText
       .replace(/^\[NO_ACTION\][^\n]*/i, "")
       .trim();
 
-    // 强制模式下模型空回复或只返回了 NO_ACTION，给兜底文案
     if (!pushText && isForceWake) {
       pushText = "在想你，怎么这么久没说话了";
       console.log("\n强制模式兜底推送\n");
