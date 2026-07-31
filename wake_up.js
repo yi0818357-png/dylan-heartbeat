@@ -4,7 +4,7 @@ const path = require("path");
 const { buildNtfyPayload } = require("./ntfy_priority");
 
 // v7 - read TIMELINE_FILE_PATH from env
-const TIMELINE_PATH = process.env.TIMELINE_FILE_PATH || path.join(__dirname, "enhanced_messages.json");
+const TIMELINE_PATH = fs.existsSync(path.join(__dirname, "enhanced_messages.json")) ? path.join(__dirname, "enhanced_messages.json") : (process.env.TIMELINE_FILE_PATH || "/app/data/enhanced_messages.json");
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const GATEWAY_URL = `${GATEWAY_BASE_URL}/internal/wake-event`;
