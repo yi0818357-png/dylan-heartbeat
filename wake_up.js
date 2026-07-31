@@ -116,8 +116,6 @@ async function sendPushNotification({ title, body }) {
     if (!topic) return { ok: false, providerLabel: "ntfy", reason: "NTFY_TOPIC 未配置" };
     
     const server = (process.env.NTFY_SERVER_URL || "https://ntfy.sh").replace(/\/+$/, "");
-    
-    // 构造请求头
     const headers = {
       "Content-Type": "text/plain",
       "Title": String(title || ""),
@@ -129,7 +127,6 @@ async function sendPushNotification({ title, body }) {
     }
 
     try {
-      // 避开 body: body 的重复键名，采用简写 body，并确保 body 有默认空串兜底
       const response = await fetchWithRetry(`${server}/${topic}`, {
         method: "POST",
         headers: headers,
@@ -144,6 +141,17 @@ async function sendPushNotification({ title, body }) {
     } catch (err) {
       return { ok: false, providerLabel: "ntfy", reason: err.message };
     }
+  }
+
+  // Bark 推送逻辑（必须包含在这个 async 函数内部！）
+  const deviceKey = String(process.env.BARK_DEVICE_KEY || "").trim();
+  if (!deviceKey) return { ok: false, providerLabel: "bark", reason: "BARK_DEVICE_KEY 未配置" };
+
+  try {
+    const response = await fetch(`https://api.day.app/${deviceKey}/${encodeURIComponent(title)}/${encodeURIComponent(body)}`);
+    return { ok: response.ok, providerLabel: "bark" };
+  } catch (err) {
+    return { ok: false, providerLabel: "bark", reason: err.message };
   }
 }
 
