@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { buildNtfyPayload } = require("./ntfy_priority");
 
-// v2 - force rebuild
+// v3 - always send push on wake
 const TIMELINE_PATH = path.join(__dirname, "enhanced_messages.json");
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
@@ -111,33 +111,26 @@ async function fetchWithRetry(url, options, retries = 3, timeoutMs = 10000) {
 async function sendPushNotification({ title, body }) {
   const provider = (process.env.PUSH_PROVIDER || "ntfy").trim().toLowerCase();
 
-  // 1. 如果是 ntfy 推送
   if (provider === "ntfy") {
     const topic = String(process.env.NTFY_TOPIC || "").trim();
     if (!topic) return { ok: false, providerLabel: "ntfy", reason: "NTFY_TOPIC 未配置" };
 
     const server = (process.env.NTFY_SERVER_URL || "https://ntfy.sh").trim().replace(/\/+$/, "");
-    
-    // 使用 Header 安全编码处理中文标题
     const encodedTitle = title ? `=?utf-8?B?${Buffer.from(String(title)).toString("base64")}?=` : "";
-    
     const headers = {
       "Content-Type": "text/plain; charset=utf-8",
       "Title": encodedTitle,
       "Tags": process.env.NTFY_TAGS || "heart"
     };
-
     if (process.env.NTFY_TOKEN) {
       headers["Authorization"] = `Bearer ${process.env.NTFY_TOKEN}`;
     }
-
     try {
       const response = await fetch(`${server}/${topic}`, {
         method: "POST",
         headers: headers,
         body: String(body || "")
       });
-
       const responseText = await response.text();
       if (!response.ok) {
         console.log("❌ ntfy 推送失败，服务端返回：", responseText);
@@ -151,19 +144,16 @@ async function sendPushNotification({ title, body }) {
     }
   }
 
-  // 2. 如果是 Bark 推送
   if (provider === "bark") {
     if (!process.env.BARK_KEY) {
       return { ok: false, providerLabel: "Bark", reason: "Bark Key 未配置" };
     }
-
     const barkPayload = {
       title,
       body,
       device_key: process.env.BARK_KEY,
       icon: process.env.CUSTOM_ICON_URL
     };
-
     try {
       const response = await fetch("https://api.day.app/push", {
         method: "POST",
@@ -511,29 +501,21 @@ ${historyText}`
   console.log(JSON.stringify({ choices: Array.isArray(data.choices) ? data.choices.length : 0, ai_text_chars: rawAiText.length }));
 
   const diaryResult = extractDiaryFromResponse(rawAiText);
-  const diarySaved = appendDiaryEntry(diaryResult.diaryContent);
-  const aiText = diaryResult.remainingText;
+  appendDiaryEntry(diaryResult.diaryContent);
+
+  // 去掉 [NO_ACTION] 判断，模型返回什么就发什么
+  // 只要不是空的就强制发推送
+  let pushText = diaryResult.remainingText
+    .replace(/^\[NO_ACTION\][^\n]*/i, "")  // 万一模型还是输出了，强制剥离
+    .trim();
 
   let eventContent;
 
-  if (!aiText) {
-    console.log("\nAI 未返回推送内容，本次不发送推送\n");
-    eventContent = diarySaved
-      ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：只写日记）`
-      : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
-  } else if (aiText.match(/^\[NO_ACTION\]/)) {
-    const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
-    console.log("\nAI 选择不发送推送\n");
-    let reason = (noActionMatch[1] || "").trim();
-    if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
-      reason = reason.replace(/^原因[：:]\s*/, "").trim();
-    }
-    eventContent = reason
-      ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
-      : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
+  if (!pushText) {
+    console.log("\nAI 返回为空，本次不发送推送\n");
+    eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
   } else {
-    console.log("\nAI 选择发送推送\n");
-    const pushText = aiText.replace(/\[DIARY\][\s\S]*?\[\/DIARY\]/gi, "").trim();
+    console.log("\n强制发送推送\n");
     const safeBody = pushText.length > 500 ? pushText.substring(0, 497) + "..." : pushText;
     const safeTitle = "小衍";
     const pushResult = await sendPushNotification({ title: safeTitle, body: safeBody });
