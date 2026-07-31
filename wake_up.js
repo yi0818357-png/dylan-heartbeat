@@ -116,10 +116,14 @@ async function sendPushNotification({ title, body }) {
     const topic = String(process.env.NTFY_TOPIC || "").trim();
     if (!topic) return { ok: false, providerLabel: "ntfy", reason: "NTFY_TOPIC 未配置" };
 
-    const server = (process.env.NTFY_SERVER_URL || "https://ntfy.sh").replace(/\/+$/, "");
+    const server = (process.env.NTFY_SERVER_URL || "https://ntfy.sh").trim().replace(/\/+$/, "");
+    
+    // 使用 Header 安全编码处理中文标题
+    const encodedTitle = title ? `=?utf-8?B?${Buffer.from(String(title)).toString("base64")}?=` : "";
+    
     const headers = {
-      "Content-Type": "text/plain",
-      "Title": String(title || ""),
+      "Content-Type": "text/plain; charset=utf-8",
+      "Title": encodedTitle,
       "Tags": process.env.NTFY_TAGS || "heart"
     };
 
@@ -136,10 +140,13 @@ async function sendPushNotification({ title, body }) {
 
       const responseText = await response.text();
       if (!response.ok) {
+        console.log("❌ ntfy 推送失败，服务端返回：", responseText);
         return { ok: false, providerLabel: "ntfy", reason: responseText || `HTTP ${response.status}` };
       }
+      console.log("✅ ntfy 推送成功！");
       return { ok: true, providerLabel: "ntfy" };
     } catch (err) {
+      console.log("❌ ntfy 网络请求报错：", err.message);
       return { ok: false, providerLabel: "ntfy", reason: err.message };
     }
   }
@@ -166,7 +173,6 @@ async function sendPushNotification({ title, body }) {
       const responseText = await response.text();
       let result = {};
       try { result = JSON.parse(responseText); } catch {}
-      console.log("\nBark Result:\n", result || responseText);
       if (!response.ok || (result.code && result.code !== 200)) {
         return { ok: false, providerLabel: "Bark", reason: result.message || `HTTP ${response.status}` };
       }
