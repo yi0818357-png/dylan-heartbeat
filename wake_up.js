@@ -95,10 +95,12 @@ async function sendPushNotification({ body }) {
     const response = await fetch(ntfyUrl, {
       method: "POST",
       body: String(body || ""),
-            headers: {
+                  headers: {
+        // encodeURIComponent 会把“小衍”安全转码，既不会报错，又能显示中文标题！
+        "Title": encodeURIComponent("小衍"),
         "Priority": "default",
         "Content-Type": "text/plain; charset=utf-8"
-            } 
+                  }
     });
     if (response.ok) {
       console.log("✅ ntfy 推送成功！");
