@@ -3,8 +3,8 @@ const fs = require("fs");
 const path = require("path");
 const { buildNtfyPayload } = require("./ntfy_priority");
 
-// v6 - hardcoded ntfy URL
-const TIMELINE_PATH = path.join(__dirname, "enhanced_messages.json");
+// v7 - read TIMELINE_FILE_PATH from env
+const TIMELINE_PATH = process.env.TIMELINE_FILE_PATH || path.join(__dirname, "enhanced_messages.json");
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const GATEWAY_URL = `${GATEWAY_BASE_URL}/internal/wake-event`;
@@ -89,8 +89,7 @@ function appendDiaryEntry(content) {
 }
 
 async function sendPushNotification({ body }) {
-  // 把标题拼在 URL 后面，ntfy 官方标准写法，稳妥不报错！
-  const ntfyUrl = "https://ntfy.sh/xiaoyixiaoyan?title=" + encodeURIComponent("小衍");
+  const ntfyUrl = "https://ntfy.sh/xiaoyixiaoyan";
   try {
     const response = await fetch(ntfyUrl, {
       method: "POST",
@@ -100,7 +99,6 @@ async function sendPushNotification({ body }) {
         "Content-Type": "text/plain; charset=utf-8"
       }
     });
-
     if (response.ok) {
       console.log("✅ ntfy 推送成功！");
       return { ok: true, providerLabel: "ntfy" };
@@ -238,8 +236,9 @@ async function fetchWeatherContext() {
 }
 
 function loadTimelineMessages() {
+  console.log("读取 timeline 文件：", TIMELINE_PATH);
   if (!fs.existsSync(TIMELINE_PATH)) {
-    console.log("未找到 enhanced_messages.json");
+    console.log("未找到 enhanced_messages.json，路径：", TIMELINE_PATH);
     return null;
   }
   try {
