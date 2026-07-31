@@ -109,12 +109,13 @@ async function fetchWithRetry(url, options, retries = 3, timeoutMs = 10000) {
 }
 
 async function sendPushNotification({ title, body }) {
-  const provider = (process.env.PUSH_PROVIDER || "bark").trim().toLowerCase();
+  const provider = (process.env.PUSH_PROVIDER || "ntfy").trim().toLowerCase();
 
+  // 1. 如果是 ntfy 推送
   if (provider === "ntfy") {
     const topic = String(process.env.NTFY_TOPIC || "").trim();
     if (!topic) return { ok: false, providerLabel: "ntfy", reason: "NTFY_TOPIC 未配置" };
-    
+
     const server = (process.env.NTFY_SERVER_URL || "https://ntfy.sh").replace(/\/+$/, "");
     const headers = {
       "Content-Type": "text/plain",
@@ -127,7 +128,7 @@ async function sendPushNotification({ title, body }) {
     }
 
     try {
-      const response = await fetchWithRetry(`${server}/${topic}`, {
+      const response = await fetch(`${server}/${topic}`, {
         method: "POST",
         headers: headers,
         body: String(body || "")
@@ -143,45 +144,39 @@ async function sendPushNotification({ title, body }) {
     }
   }
 
-  // Bark 推送逻辑（必须包含在这个 async 函数内部！）
-  const deviceKey = String(process.env.BARK_DEVICE_KEY || "").trim();
-  if (!deviceKey) return { ok: false, providerLabel: "bark", reason: "BARK_DEVICE_KEY 未配置" };
+  // 2. 如果是 Bark 推送
+  if (provider === "bark") {
+    if (!process.env.BARK_KEY) {
+      return { ok: false, providerLabel: "Bark", reason: "Bark Key 未配置" };
+    }
 
-  try {
-    const response = await fetch(`https://api.day.app/${deviceKey}/${encodeURIComponent(title)}/${encodeURIComponent(body)}`);
-    return { ok: response.ok, providerLabel: "bark" };
-  } catch (err) {
-    return { ok: false, providerLabel: "bark", reason: err.message };
-  }
-}
+    const barkPayload = {
+      title,
+      body,
+      device_key: process.env.BARK_KEY,
+      icon: process.env.CUSTOM_ICON_URL
+    };
 
-  if (provider !== "bark") {
-    return { ok: false, providerLabel: provider || "未知渠道", reason: `不支持的 PUSH_PROVIDER：${provider}` };
+    try {
+      const response = await fetch("https://api.day.app/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(barkPayload)
+      });
+      const responseText = await response.text();
+      let result = {};
+      try { result = JSON.parse(responseText); } catch {}
+      console.log("\nBark Result:\n", result || responseText);
+      if (!response.ok || (result.code && result.code !== 200)) {
+        return { ok: false, providerLabel: "Bark", reason: result.message || `HTTP ${response.status}` };
+      }
+      return { ok: true, providerLabel: "Bark" };
+    } catch (err) {
+      return { ok: false, providerLabel: "Bark", reason: err.message };
+    }
   }
 
-  if (!process.env.BARK_KEY) {
-    return { ok: false, providerLabel: "Bark", reason: "Bark Key 未配置" };
-  }
-
-  const barkPayload = {
-    title,
-    body,
-    device_key: process.env.BARK_KEY,
-    icon: process.env.CUSTOM_ICON_URL
-  };
-  const response = await fetch("https://api.day.app/push", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(barkPayload)
-  });
-  const responseText = await response.text();
-  let result = {};
-  try { result = JSON.parse(responseText); } catch {}
-  console.log("\nBark Result:\n", result || responseText);
-  if (!response.ok || (result.code && result.code !== 200)) {
-    return { ok: false, providerLabel: "Bark", reason: result.message || `HTTP ${response.status}` };
-  }
-  return { ok: true, providerLabel: "Bark" };
+  return { ok: false, providerLabel: provider || "未知渠道", reason: `不支持的 PUSH_PROVIDER：${provider}` };
 }
 
 function isDayTime(date = new Date()) {
