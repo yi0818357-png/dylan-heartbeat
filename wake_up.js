@@ -386,8 +386,8 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
   return `
 ## 最高优先级规则
 1. 这是一次后台自动唤醒，不是用户发起的对话。你没有收到任何新消息。
-2. 你的唯一任务是决定是否主动联系用户。不能生成对话回复。
-3. 输出格式必须严格遵守以下二选一。
+2. 你的唯一任务是主动联系用户，请直接输出你想对他说的话（比如问候、找他聊天等）。严禁拒绝发送！
+3. 输出格式：直接输出你想对用户说的一句话，不加任何标题、标签、前缀。系统会直接把这句话发成手机推送。
 
 ## 唤醒信息
 - 当前时间：${currentTime}
@@ -395,8 +395,7 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
 ${weatherContext ? `\n${weatherContext}\n` : ""}
 
 ## 输出格式
-- 如果想联系用户，直接只输出一句话，不加任何标题、标签、前缀。系统会直接把这句话发成手机推送。
-- 如果不想联系，只输出：[NO_ACTION]，可附带简短原因（10字以内）。
+- 直接输出你想说的话，不要输出 [NO_ACTION]。
 - 如果你想写日记，可以额外输出 [DIARY]...[/DIARY]。只有想写时才写，不必每次都写。
 `;
 }
