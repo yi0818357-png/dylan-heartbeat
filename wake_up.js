@@ -95,11 +95,10 @@ async function sendPushNotification({ body }) {
     const response = await fetch(ntfyUrl, {
       method: "POST",
       body: String(body || ""),
-      headers: {
-        "Title": "小衍",
+            headers: {
         "Priority": "default",
         "Content-Type": "text/plain; charset=utf-8"
-      }
+            } 
     });
     if (response.ok) {
       console.log("✅ ntfy 推送成功！");
