@@ -89,26 +89,25 @@ function appendDiaryEntry(content) {
 }
 
 async function sendPushNotification({ body }) {
-  // 锁定推送地址，不走环境变量拼接
-  const ntfyUrl = "https://ntfy.sh/xiaoyixiaoyan";
+  // 把标题拼在 URL 后面，ntfy 官方标准写法，稳妥不报错！
+  const ntfyUrl = "https://ntfy.sh/xiaoyixiaoyan?title=" + encodeURIComponent("小衍");
   try {
     const response = await fetch(ntfyUrl, {
       method: "POST",
       body: String(body || ""),
-                  headers: {
-        // encodeURIComponent 会把“小衍”安全转码，既不会报错，又能显示中文标题！
-        "Title": encodeURIComponent("小衍"),
+      headers: {
         "Priority": "default",
         "Content-Type": "text/plain; charset=utf-8"
-                  }
+      }
     });
+
     if (response.ok) {
       console.log("✅ ntfy 推送成功！");
       return { ok: true, providerLabel: "ntfy" };
     } else {
       const responseText = await response.text();
       console.log("❌ ntfy 推送失败，服务端返回：", responseText);
-      return { ok: false, providerLabel: "ntfy", reason: responseText || `HTTP ${response.status}` };
+      return { ok: false, providerLabel: "ntfy", reason: responseText };
     }
   } catch (err) {
     console.log("❌ ntfy 网络请求报错：", err.message);
