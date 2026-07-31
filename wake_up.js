@@ -90,7 +90,7 @@ function appendDiaryEntry(content) {
 
 async function sendPushNotification({ body }) {
   // 1. 优先读取环境变量，没有配才使用默认值
-  const ntfyUrl = process.env.NTFY_URL || "https://ntfy.sh/xiaoyixiaoyan";
+  const ntfyUrl = "https://ntfy-proxy.zeabur.app/push";
   
   // 2. 增加 5 秒超时保护，防止网络卡死
   const controller = new AbortController();
@@ -98,14 +98,16 @@ async function sendPushNotification({ body }) {
 
   try {
     const response = await fetch(ntfyUrl, {
-      method: "POST",
-      body: String(body || ""),
-      headers: {
-        "Priority": "default",
-        "Content-Type": "text/plain; charset=utf-8"
-      },
-      signal: controller.signal
-    });
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    topic: "xiaoyixiaoyan",
+    message: String(body || "")
+  }),
+  signal: controller.signal
+});
 
     if (response.ok) {
       console.log("✅ ntfy 推送成功！");
