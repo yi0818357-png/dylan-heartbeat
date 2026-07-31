@@ -89,7 +89,13 @@ function appendDiaryEntry(content) {
 }
 
 async function sendPushNotification({ body }) {
-  const ntfyUrl = "https://ntfy.sh/xiaoyixiaoyan";
+  // 1. 优先读取环境变量，没有配才使用默认值
+  const ntfyUrl = process.env.NTFY_URL || "https://ntfy.sh/xiaoyixiaoyan";
+  
+  // 2. 增加 5 秒超时保护，防止网络卡死
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+
   try {
     const response = await fetch(ntfyUrl, {
       method: "POST",
@@ -97,8 +103,10 @@ async function sendPushNotification({ body }) {
       headers: {
         "Priority": "default",
         "Content-Type": "text/plain; charset=utf-8"
-      }
+      },
+      signal: controller.signal
     });
+
     if (response.ok) {
       console.log("✅ ntfy 推送成功！");
       return { ok: true, providerLabel: "ntfy" };
@@ -108,8 +116,11 @@ async function sendPushNotification({ body }) {
       return { ok: false, providerLabel: "ntfy", reason: responseText };
     }
   } catch (err) {
-    console.log("❌ ntfy 网络请求报错：", err.message);
-    return { ok: false, providerLabel: "ntfy", reason: err.message };
+    const errorMsg = err.name === "AbortError" ? "请求超时(5s)" : err.message;
+    console.log("❌ ntfy 网络请求报错：", errorMsg);
+    return { ok: false, providerLabel: "ntfy", reason: errorMsg };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
