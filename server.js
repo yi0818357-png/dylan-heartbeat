@@ -532,6 +532,15 @@ app.get("/v1/models", async (req, reply) => {
     data: [{ id: configuredModelName(), object: "model", created: 0, owned_by: "gateway" }]
   });
 });
+// Credits 兼容接口（防止 Kelivo 报 404）
+app.get("/v1/credits", async (req, reply) => {
+  reply.send({
+    object: "credit",
+    total_granted: 999999,
+    total_used: 0,
+    total_available: 999999
+  });
+});
 
 // ========================
 // Chat Completions
